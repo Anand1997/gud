@@ -1,3 +1,8 @@
+/*
+ * GUD - Yet another Typo for get !
+ *
+ * Copyright (C) Anand Narawade, 2024
+ */
 #include "cache.h"
 
 const char *sha1_file_directory = NULL;

@@ -1,3 +1,8 @@
+/*
+ * GUD - Yet another Typo for get !
+ *
+ * Copyright (C) Anand Narawade, 2024
+ */
 #include "cache.h"
 
 #define MTIME_CHANGED	0x0001
