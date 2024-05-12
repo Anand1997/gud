@@ -1,4 +1,5 @@
 #include "cache.h"
+#include <string.h>
 
 static int cache_name_compare(const char *name1, int len1, const char *name2, int len2)
 {
@@ -80,12 +81,17 @@ static int index_fd(const char *path, int namelen, struct cache_entry *ce, int f
 	void *out = malloc(max_out_bytes);
 	void *metadata = malloc(namelen + 200);
 	void *in = mmap(NULL, st->st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	SHA_CTX c;
+	// SHA_CTX c;
+	EVP_MD_CTX *hashctx = EVP_MD_CTX_new();
+    const EVP_MD *hashptr = EVP_get_digestbyname("SHA1");
 
 	close(fd);
-	if (!out || (int)(long)in == -1)
+	if (!out || (int)(long)in == -1){
+		free(out);
+		free(metadata);
+		EVP_MD_CTX_free(hashctx);
 		return -1;
-
+	}
 	memset(&stream, 0, sizeof(stream));
 	deflateInit(&stream, Z_BEST_COMPRESSION);
 
@@ -109,9 +115,22 @@ static int index_fd(const char *path, int namelen, struct cache_entry *ce, int f
 
 	deflateEnd(&stream);
 	
+	/* Legacy code 
 	SHA1_Init(&c);
 	SHA1_Update(&c, out, stream.total_out);
 	SHA1_Final(ce->sha1, &c);
+	*/
+
+	// Compute SHA-1 hash
+    EVP_DigestInit_ex(hashctx, hashptr, NULL);
+    EVP_DigestUpdate(hashctx, out, stream.total_out);
+    EVP_DigestFinal_ex(hashctx, ce->sha1, NULL);
+    EVP_MD_CTX_free(hashctx);
+
+	// Clean up memory
+    free(out);
+    free(metadata);
+    munmap(in, st->st_size);
 
 	return write_sha1_buffer(ce->sha1, out, stream.total_out);
 }
@@ -158,7 +177,9 @@ static int add_file_to_cache(char *path)
 
 static int write_cache(int newfd, struct cache_entry **cache, int entries)
 {
-	SHA_CTX c;
+	// SHA_CTX c;
+	EVP_MD_CTX *hashctx = EVP_MD_CTX_new();
+    const EVP_MD *hashptr = EVP_get_digestbyname("SHA1");
 	struct cache_header hdr;
 	int i;
 
@@ -166,13 +187,34 @@ static int write_cache(int newfd, struct cache_entry **cache, int entries)
 	hdr.version = 1;
 	hdr.entries = entries;
 
+	/* Legacy code 
 	SHA1_Init(&c);
 	SHA1_Update(&c, &hdr, offsetof(struct cache_header, sha1));
+	*/
+
+	// Compute SHA-1 hash for the header
+    EVP_DigestInit_ex(hashctx, hashptr, NULL);
+    EVP_DigestUpdate(hashctx, &hdr, offsetof(struct cache_header, sha1));
+    EVP_DigestFinal_ex(hashctx, hdr.sha1, NULL);
+	if (write(newfd, &hdr, sizeof(hdr)) != sizeof(hdr)){
+        EVP_MD_CTX_free(hashctx);
+        return -1;
+    }
+
 	for (i = 0; i < entries; i++) {
 		struct cache_entry *ce = cache[i];
 		int size = ce_size(ce);
-		SHA1_Update(&c, ce, size);
+		// SHA1_Update(&c, ce, size);
+		// Compute SHA-1 hash for each cache entry
+        EVP_DigestInit_ex(hashctx, hashptr, NULL);
+        EVP_DigestUpdate(hashctx, ce, size);
+        EVP_DigestFinal_ex(hashctx, ce->sha1, NULL);
+		if (write(newfd, ce, size) != size){
+            EVP_MD_CTX_free(hashctx);
+            return -1;
+        }
 	}
+	/* Legacy code 
 	SHA1_Final(hdr.sha1, &c);
 
 	if (write(newfd, &hdr, sizeof(hdr)) != sizeof(hdr))
@@ -184,6 +226,8 @@ static int write_cache(int newfd, struct cache_entry **cache, int entries)
 		if (write(newfd, ce, size) != size)
 			return -1;
 	}
+	*/
+	EVP_MD_CTX_free(hashctx);
 	return 0;
 }		
 
